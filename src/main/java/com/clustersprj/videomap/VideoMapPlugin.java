@@ -37,7 +37,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
 
     private static final Pattern NAME_PATTERN = Pattern.compile("[A-Za-z0-9_-]{1,32}");
     private static final Set<String> URL_SCHEMES = Set.of("http", "https", "rtmp", "rtmps", "rtsp", "srt");
-    private static final List<String> SUBCOMMANDS = List.of("create", "remove", "play", "live", "stop", "list");
+    private static final List<String> SUBCOMMANDS = List.of("create", "remove", "play", "live", "stop", "list", "reload");
 
     private final Map<String, Screen> screens = new TreeMap<>();
     private VcAudio vcAudio;
@@ -194,16 +194,22 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
             case "live" -> cmdPlay(sender, args, true);
             case "stop" -> cmdStop(sender, args);
             case "list" -> cmdList(sender);
+            case "reload" -> cmdReload(sender);
             default -> usage(sender);
         }
         return true;
+    }
+
+    private void cmdReload(CommandSender sender) {
+        reloadConfig();
+        msg(sender, NamedTextColor.GREEN, "config.yml を再読み込みしたよ。再生中のスクリーンは、次に play / live したときから新しい設定になるよ");
     }
 
     private void usage(CommandSender s) {
         msg(s, NamedTextColor.YELLOW, "/videomap create <名前> <横> <縦>  ... 見ている壁面にスクリーンを作成");
         msg(s, NamedTextColor.YELLOW, "/videomap play <名前> <ファイル名|URL> ... 動画を再生");
         msg(s, NamedTextColor.YELLOW, "/videomap live <名前> <キー|URL> ... ライブ配信を映す(キーならRTMP待ち受け)");
-        msg(s, NamedTextColor.YELLOW, "/videomap stop <名前> / remove <名前> / list");
+        msg(s, NamedTextColor.YELLOW, "/videomap stop <名前> / remove <名前> / list / reload");
     }
 
     private void cmdCreate(CommandSender sender, String[] args) {

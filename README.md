@@ -25,6 +25,7 @@ CI(`.github/workflows/build.yml`)がビルドして Reposilite に公開する�
      OBS: サーバー `rtmp://<サーバーIP>:1935/live` / ストリームキー `mykey`
    - URL指定 `/videomap live hall rtmp://example/live/stream` (rtmp/rtsp/srt/http)
 4. `/videomap stop hall` / `/videomap remove hall` / `/videomap list`
+5. `/videomap reload` で config.yml を再読み込み(再生中のスクリーンには次の play / live から反映)
 
 権限は `videomap.admin`(デフォルト OP)。
 
