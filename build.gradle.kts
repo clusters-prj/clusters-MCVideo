@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "com.clustersprj"
-version = "1.0.0"
+version = "1.0.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
@@ -16,6 +16,11 @@ dependencies {
 
 java {
     toolchain.languageVersion.set(JavaLanguageVersion.of(25))
+}
+
+// CI の公開処理は jar 名 <artifactId>-<version>.jar からバージョンを取り出す
+tasks.jar {
+    archiveBaseName.set("videomap")
 }
 
 tasks.withType<JavaCompile> {
