@@ -11,7 +11,9 @@ Velocity 配下なら、映したいバックエンド(Paper 26.2)側に入れ�
 ```
 gradle build
 ```
-`build/libs/VideoMap-1.0.0.jar` を `plugins/` に入れる。
+`build/libs/videomap-<version>.jar` を `plugins/` に入れる。
+
+CI(`.github/workflows/build.yml`)がビルドして Reposilite に公開する。`build.gradle.kts` の `version` が `-SNAPSHOT` なら全ブランチが `/snapshots/videomap/<ブランチ>/<version>/` へ、`-SNAPSHOT` を外して main に push すると `/releases/videomap/<version>/` へ公開される(リポジトリ/組織の Secrets に `REPOSILITE_USER` / `REPOSILITE_TOKEN` が必要。無ければ公開だけスキップ)。
 
 ## 使い方
 1. 壁に向かって立ち、見ているブロックが**左下の角**になるようにスクリーンを作成
