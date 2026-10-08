@@ -6,6 +6,9 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 
 /** ffmpeg を起動して rawvideo(rgb24) を読み取り、スクリーンへ流し込むスレッド。 */
@@ -13,18 +16,38 @@ final class FramePlayer implements Runnable {
 
     private final VideoMapPlugin plugin;
     private final Screen screen;
-    private final List<String> command;
+    private volatile List<String> command;
+    /** 音声出力を付けた command が音声なしの入力で失敗したときに使う、映像のみの command。無ければ null。 */
+    private final List<String> fallback;
     private final boolean reconnect;
+    /** 音声(VC)に合わせて映像の表示を遅らせる量(ms)。0 なら即時。 */
+    private final ScheduledExecutorService delayer;
+    private final int videoDelayMs;
 
     private volatile boolean stopped;
+    private volatile boolean noAudioStream;
     private volatile Process process;
     private Thread thread;
 
     FramePlayer(VideoMapPlugin plugin, Screen screen, List<String> command, boolean reconnect) {
+        this(plugin, screen, command, null, reconnect, 0);
+    }
+
+    FramePlayer(VideoMapPlugin plugin, Screen screen, List<String> command, List<String> fallback,
+                boolean reconnect, int videoDelayMs) {
         this.plugin = plugin;
         this.screen = screen;
         this.command = command;
+        this.fallback = fallback;
         this.reconnect = reconnect;
+        this.videoDelayMs = videoDelayMs;
+        this.delayer = videoDelayMs > 0
+                ? Executors.newSingleThreadScheduledExecutor(r -> {
+                    Thread t = new Thread(r, "VideoMap-delay-" + screen.name);
+                    t.setDaemon(true);
+                    return t;
+                })
+                : null;
     }
 
     void start() {
@@ -37,6 +60,7 @@ final class FramePlayer implements Runnable {
         stopped = true;
         Process p = process;
         if (p != null) p.destroy();
+        if (delayer != null) delayer.shutdownNow();
         if (thread != null) thread.interrupt();
     }
 
@@ -48,7 +72,7 @@ final class FramePlayer implements Runnable {
         try {
             while (!stopped) {
                 try {
-                    runOnce(raw, width, height);
+                    if (runOnce(raw, width, height)) continue; // 映像のみで即やり直し
                 } catch (IOException e) {
                     if (!stopped) {
                         plugin.getLogger().log(Level.WARNING, "[" + screen.name + "] ffmpeg error: " + e.getMessage());
@@ -62,11 +86,13 @@ final class FramePlayer implements Runnable {
         } finally {
             Process p = process;
             if (p != null) p.destroy();
-            screen.playerFinished(this);
+            if (delayer != null) delayer.shutdownNow();
+            if (screen.playerFinished(this)) plugin.onPlayerFinished(screen);
         }
     }
 
-    private void runOnce(byte[] raw, int width, int height) throws IOException {
+    /** @return 音声なしの入力だったため映像のみの command に切り替えた(=すぐやり直すべき)なら true */
+    private boolean runOnce(byte[] raw, int width, int height) throws IOException {
         ProcessBuilder pb = new ProcessBuilder(command);
         Process p = pb.start();
         process = p;
@@ -75,19 +101,37 @@ final class FramePlayer implements Runnable {
         err.setDaemon(true);
         err.start();
 
+        boolean gotFrame = false;
         try (InputStream in = p.getInputStream()) {
             while (!stopped && readFully(in, raw)) {
+                gotFrame = true;
                 convertAndPublish(raw, width, height);
             }
         } finally {
             p.destroy();
         }
+
+        // 音声ストリームの無い入力に音声出力を付けると ffmpeg は起動時に失敗する。映像のみに切り替える。
+        try {
+            err.join(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (!gotFrame && !stopped && fallback != null && noAudioStream && command != fallback) {
+            plugin.getLogger().info("[" + screen.name + "] 音声ストリームが無いので映像のみで再生します");
+            command = fallback;
+            noAudioStream = false;
+            plugin.onAudioUnavailable(screen);
+            return true;
+        }
+        return false;
     }
 
     private void drainStderr(Process p) {
         try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getErrorStream(), StandardCharsets.UTF_8))) {
             String line;
             while ((line = r.readLine()) != null) {
+                if (line.contains("does not contain any stream")) noAudioStream = true;
                 if (!stopped) plugin.getLogger().info("[ffmpeg:" + screen.name + "] " + line);
             }
         } catch (IOException ignored) {
@@ -122,6 +166,18 @@ final class FramePlayer implements Runnable {
                 tiles[rowTile + (x >> 7)][ty + (x & 127)] = lut[((r >> 3) << 10) | ((g >> 3) << 5) | (b >> 3)];
             }
         }
-        if (!stopped) screen.publish(tiles);
+        if (stopped) return;
+        if (delayer == null) {
+            screen.publish(tiles);
+        } else {
+            // 音声は VC 経由で少し遅れて届くので、映像も同じだけ遅らせて口の動きとのズレを抑える
+            try {
+                delayer.schedule(() -> {
+                    if (!stopped) screen.publish(tiles);
+                }, videoDelayMs, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                // 停止処理中
+            }
+        }
     }
 }

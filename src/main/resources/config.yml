@@ -19,3 +19,18 @@ live:
   listen-port: 1935
   # 配信が切れたら自動で待ち受けに戻る(OBSの再接続用)
   reconnect: true
+
+# 音声を Minecraft-Spatial-Audio-Link(msal-node) のボイスチャットで流す
+# スクリーンの位置に「音源」ができ、VC に接続しているプレイヤーが近づくと聞こえる
+vc-audio:
+  enabled: false
+  # msal-node のベースURL(プラグインから届く内部アドレス)
+  base-url: "http://127.0.0.1:8010"
+  # msal-node の .env の PLUGIN_API_KEY と同じ値(必須。空だと無効)
+  api-key: ""
+  # スクリーン中心から何ブロックまで聞こえるか(1〜128)
+  range: 32
+  # 音量(0.0〜1.0)
+  volume: 1.0
+  # VC 経由の音声は少し遅れて届くので、映像の表示を遅らせて合わせる(ms)。ズレが気になったら調整
+  video-delay-ms: 400
