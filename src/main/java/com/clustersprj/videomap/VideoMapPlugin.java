@@ -40,6 +40,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
     private static final List<String> SUBCOMMANDS = List.of("create", "remove", "play", "live", "stop", "list");
 
     private final Map<String, Screen> screens = new TreeMap<>();
+    private VcAudio vcAudio;
     private File screensFile;
     private File videosDir;
 
@@ -51,6 +52,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
         if (!videosDir.exists() && !videosDir.mkdirs()) {
             getLogger().warning("videos フォルダを作成できませんでした");
         }
+        vcAudio = new VcAudio(this);
         loadScreens();
 
         var cmd = getCommand("videomap");
@@ -64,8 +66,43 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
     @Override
     public void onDisable() {
         for (Screen s : screens.values()) {
-            s.stop();
+            stopScreen(s);
         }
+    }
+
+    // ------------------------------------------------------------ 音声(VC連携)
+
+    /** 再生を止め、VC 側の音源も撤去する。 */
+    private void stopScreen(Screen screen) {
+        screen.stop();
+        vcAudio.stop(screen.name);
+    }
+
+    /** 再生スレッドが自然終了したとき(FramePlayer から)。VC の音源を撤去する。 */
+    void onPlayerFinished(Screen screen) {
+        vcAudio.stop(screen.name);
+    }
+
+    /** 入力に音声が無く映像のみに切り替えたとき(FramePlayer から)。VC の音源を撤去する。 */
+    void onAudioUnavailable(Screen screen) {
+        vcAudio.stop(screen.name);
+    }
+
+    /** 音が出る位置 = スクリーンの中心。保存が無い古いスクリーンは、ロード済みの額縁から求める。 */
+    private double[] screenCenter(Screen screen) {
+        if (screen.centerKnown) return new double[]{screen.cx, screen.cy, screen.cz};
+        double sx = 0, sy = 0, sz = 0;
+        int n = 0;
+        for (UUID id : screen.frameIds) {
+            Entity e = Bukkit.getEntity(id);
+            if (e == null) continue;
+            sx += e.getLocation().getX();
+            sy += e.getLocation().getY();
+            sz += e.getLocation().getZ();
+            n++;
+        }
+        if (n == 0) return null;
+        return new double[]{sx / n, sy / n, sz / n};
     }
 
     // ------------------------------------------------------------ 永続化
@@ -79,6 +116,13 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
             if (sec == null) continue;
             Screen screen = new Screen(name, sec.getString("world", ""), sec.getInt("w"), sec.getInt("h"));
             screen.mapIds.addAll(sec.getIntegerList("maps"));
+            List<Double> center = sec.getDoubleList("center");
+            if (center.size() == 3) {
+                screen.cx = center.get(0);
+                screen.cy = center.get(1);
+                screen.cz = center.get(2);
+                screen.centerKnown = true;
+            }
             for (String id : sec.getStringList("frames")) {
                 try {
                     screen.frameIds.add(UUID.fromString(id));
@@ -103,6 +147,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
             yml.set(s.name + ".w", s.w);
             yml.set(s.name + ".h", s.h);
             yml.set(s.name + ".maps", s.mapIds);
+            if (s.centerKnown) yml.set(s.name + ".center", List.of(s.cx, s.cy, s.cz));
             List<String> frames = new ArrayList<>();
             for (UUID id : s.frameIds) frames.add(id.toString());
             yml.set(s.name + ".frames", frames);
@@ -256,6 +301,20 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
                 screen.frameIds.add(frame.getUniqueId());
             }
         }
+        // 音の発生位置(画面中心)。ブロックの中心を平均する
+        double sx = 0, sy = 0, sz = 0;
+        for (Block[] row : spots) {
+            for (Block b : row) {
+                sx += b.getX() + 0.5;
+                sy += b.getY() + 0.5;
+                sz += b.getZ() + 0.5;
+            }
+        }
+        screen.cx = sx / (w * h);
+        screen.cy = sy / (w * h);
+        screen.cz = sz / (w * h);
+        screen.centerKnown = true;
+
         screen.fillBlack();
         screens.put(name, screen);
         saveScreens();
@@ -265,7 +324,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
     private void cmdRemove(CommandSender sender, String[] args) {
         Screen screen = requireScreen(sender, args);
         if (screen == null) return;
-        screen.stop();
+        stopScreen(screen);
         for (UUID id : screen.frameIds) {
             Entity e = Bukkit.getEntity(id);
             if (e != null) e.remove();
@@ -278,7 +337,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
     private void cmdStop(CommandSender sender, String[] args) {
         Screen screen = requireScreen(sender, args);
         if (screen == null) return;
-        screen.stop();
+        stopScreen(screen);
         msg(sender, NamedTextColor.GREEN, "「" + screen.name + "」を停止したよ");
     }
 
@@ -311,7 +370,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
             return;
         }
         boolean reconnect = live && getConfig().getBoolean("live.reconnect", true);
-        screen.startPlayer(new FramePlayer(this, screen, cmd, reconnect));
+        startPlayback(sender, screen, cmd, reconnect);
 
         if (live && !args[2].contains("://")) {
             int port = getConfig().getInt("live.listen-port", 1935);
@@ -319,6 +378,42 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
         } else {
             msg(sender, NamedTextColor.GREEN, "「" + screen.name + "」で再生を開始したよ");
         }
+    }
+
+    /**
+     * 再生を開始する。vc-audio が有効なら、先に VC 側の音源を作ってから(push が 404 にならないよう)
+     * 音声出力付きの ffmpeg を起動する。音源を作れなければ映像のみで再生する。
+     */
+    private void startPlayback(CommandSender sender, Screen screen, List<String> videoOnly, boolean reconnect) {
+        double[] center = vcAudio.enabled() ? screenCenter(screen) : null;
+        if (center == null) {
+            if (vcAudio.enabled()) {
+                msg(sender, NamedTextColor.YELLOW, "スクリーンの位置が分からないので音声なしで再生するよ(作り直すと音が出るよ)");
+            }
+            screen.seq.incrementAndGet();
+            screen.startPlayer(new FramePlayer(this, screen, videoOnly, reconnect));
+            return;
+        }
+
+        int seq = screen.seq.incrementAndGet();
+        List<String> withAudio = new ArrayList<>(videoOnly);
+        withAudio.addAll(vcAudio.outputArgs(screen.name));
+        int delay = vcAudio.videoDelayMs();
+
+        vcAudio.start(screen.name, screen.worldName, center[0], center[1], center[2]).thenAccept(ok ->
+                Bukkit.getScheduler().runTask(this, () -> {
+                    if (screen.seq.get() != seq) {
+                        // 音源作成中に stop / 再 play された
+                        if (ok) vcAudio.stop(screen.name);
+                        return;
+                    }
+                    if (ok) {
+                        screen.startPlayer(new FramePlayer(this, screen, withAudio, videoOnly, reconnect, delay));
+                    } else {
+                        msg(sender, NamedTextColor.YELLOW, "VC に音声を流せなかったので映像のみで再生するよ(コンソールを確認してね)");
+                        screen.startPlayer(new FramePlayer(this, screen, videoOnly, reconnect));
+                    }
+                }));
     }
 
     private Screen requireScreen(CommandSender sender, String[] args) {
