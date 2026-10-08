@@ -1,0 +1,21 @@
+# ffmpeg の実行ファイル(PATHに通っていればそのままでOK)
+ffmpeg-path: "ffmpeg"
+
+# 再生FPS。マップ更新は帯域を食うので 8〜12 くらいがおすすめ
+fps: 10
+
+# fit = 縦横比を維持して黒帯を入れる / stretch = 画面いっぱいに引き伸ばす
+aspect: fit
+
+# 画面サイズの上限(マップ枚数: 横 x 縦)
+max-width: 8
+max-height: 6
+
+# 動画ファイル/URL(play)をループ再生するか
+loop: false
+
+live:
+  # ライブ(listen モード)で受け付ける RTMP ポート
+  listen-port: 1935
+  # 配信が切れたら自動で待ち受けに戻る(OBSの再接続用)
+  reconnect: true

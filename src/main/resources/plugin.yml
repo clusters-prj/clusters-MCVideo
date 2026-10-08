@@ -1,0 +1,15 @@
+name: VideoMap
+version: '${version}'
+main: com.clustersprj.videomap.VideoMapPlugin
+api-version: '26.2'
+description: Play video files and live streams on item-frame map walls via ffmpeg
+commands:
+  videomap:
+    description: VideoMap management command
+    usage: /videomap <create|remove|play|live|stop|list>
+    aliases: [vmap]
+    permission: videomap.admin
+permissions:
+  videomap.admin:
+    description: Manage video screens and playback
+    default: op
