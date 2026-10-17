@@ -20,6 +20,17 @@ live:
   # 配信が切れたら自動で待ち受けに戻る(OBSの再接続用)
   reconnect: true
 
+# 差分更新(大きい画面でサーバーが固まるのを防ぐ)
+# 前提: paper-world-defaults.yml の maps.item-frame-cursor-update-interval を 1 にしておくこと
+block-update:
+  # 1tick・1スクリーンあたりに更新するマップ枚数の上限(0 = 無制限)。大きい画面ほど小さめに。
+  # 変化の大きいマップから優先して更新し、溢れた分は次のtick以降に回る
+  max-maps-per-tick: 48
+  # 色の差がこの値(RGB 0〜255 換算)以下のピクセルは「変わっていない」とみなす。大きいほど軽く、ざらつく
+  pixel-threshold: 20
+  # 16x16 ブロックの中でこの数以上のピクセルが変わったときだけ、そのブロックを更新する
+  block-min-pixels: 4
+
 # 音声を Minecraft-Spatial-Audio-Link(msal-node) のボイスチャットで流す
 # スクリーンの位置に「音源」ができ、VC に接続しているプレイヤーが近づくと聞こえる
 vc-audio:

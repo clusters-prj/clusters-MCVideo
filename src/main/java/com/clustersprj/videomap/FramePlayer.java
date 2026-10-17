@@ -23,6 +23,9 @@ final class FramePlayer implements Runnable {
     /** 音声(VC)に合わせて映像の表示を遅らせる量(ms)。0 なら即時。 */
     private final ScheduledExecutorService delayer;
     private final int videoDelayMs;
+    private final TileUpdateQueue.Settings blockSettings;
+    /** 遅延なしのときに使い回すフレームバッファ。 */
+    private byte[][] reuse;
 
     private volatile boolean stopped;
     private volatile boolean noAudioStream;
@@ -41,6 +44,7 @@ final class FramePlayer implements Runnable {
         this.fallback = fallback;
         this.reconnect = reconnect;
         this.videoDelayMs = videoDelayMs;
+        this.blockSettings = plugin.blockSettings();
         this.delayer = videoDelayMs > 0
                 ? Executors.newSingleThreadScheduledExecutor(r -> {
                     Thread t = new Thread(r, "VideoMap-delay-" + screen.name);
@@ -152,7 +156,14 @@ final class FramePlayer implements Runnable {
     private void convertAndPublish(byte[] raw, int width, int height) {
         if (stopped) return;
         int tw = screen.w;
-        byte[][] tiles = new byte[tw * screen.h][128 * 128];
+        int n = tw * screen.h;
+        byte[][] tiles;
+        if (delayer == null) {
+            if (reuse == null) reuse = new byte[n][128 * 128];
+            tiles = reuse;
+        } else {
+            tiles = new byte[n][128 * 128]; // 遅延中に書き換わらないよう毎回新規
+        }
         byte[] lut = ColorLut.LUT;
         for (int y = 0; y < height; y++) {
             int rowTile = (y >> 7) * tw;
@@ -168,12 +179,12 @@ final class FramePlayer implements Runnable {
         }
         if (stopped) return;
         if (delayer == null) {
-            screen.publish(tiles);
+            screen.queue.offer(tiles, blockSettings, false);
         } else {
             // 音声は VC 経由で少し遅れて届くので、映像も同じだけ遅らせて口の動きとのズレを抑える
             try {
                 delayer.schedule(() -> {
-                    if (!stopped) screen.publish(tiles);
+                    if (!stopped) screen.queue.offer(tiles, blockSettings, false);
                 }, videoDelayMs, TimeUnit.MILLISECONDS);
             } catch (java.util.concurrent.RejectedExecutionException ignored) {
                 // 停止処理中
