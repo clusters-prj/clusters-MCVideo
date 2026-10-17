@@ -22,6 +22,12 @@ final class ColorLut {
     static final byte[] LUT = new byte[32768];
     static final byte BLACK;
 
+    /**
+     * パレット index(0..255) 同士の色の離れ具合(重み付き二乗距離)。DIST[(a&0xFF)<<8 | (b&0xFF)]。
+     * 重みは LUT と同じ (3,4,2)。√(値/9) がおおよそ RGB 0..255 の差になる。使われない index は 0。
+     */
+    static final int[] DIST = new int[256 * 256];
+
     static {
         int n = BASE.length * 4;
         int[] pr = new int[n];
@@ -55,6 +61,13 @@ final class ColorLut {
             LUT[key] = (byte) idx[best];
         }
         BLACK = LUT[0];
+
+        for (int a = 0; a < n; a++) {
+            for (int b = 0; b < n; b++) {
+                int dr = pr[a] - pr[b], dg = pg[a] - pg[b], db = pb[a] - pb[b];
+                DIST[(idx[a] << 8) | idx[b]] = 3 * dr * dr + 4 * dg * dg + 2 * db * db;
+            }
+        }
     }
 
     private ColorLut() {

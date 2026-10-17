@@ -60,6 +60,7 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
             cmd.setExecutor(this);
             cmd.setTabCompleter(this);
         }
+        Bukkit.getScheduler().runTaskTimer(this, this::releaseTiles, 1L, 1L);
         getLogger().info("VideoMap 有効化: スクリーン " + screens.size() + " 件");
     }
 
@@ -67,6 +68,23 @@ public final class VideoMapPlugin extends JavaPlugin implements TabExecutor {
     public void onDisable() {
         for (Screen s : screens.values()) {
             stopScreen(s);
+        }
+    }
+
+    // ------------------------------------------------------------ 差分更新
+
+    /** ブロック差分検出の設定(再生開始時に読む)。 */
+    TileUpdateQueue.Settings blockSettings() {
+        return TileUpdateQueue.Settings.of(
+                getConfig().getDouble("block-update.pixel-threshold", 20),
+                getConfig().getInt("block-update.block-min-pixels", 4));
+    }
+
+    /** 毎tick、反映待ちのタイルを上限枚数まで画面に反映する。 */
+    private void releaseTiles() {
+        int budget = getConfig().getInt("block-update.max-maps-per-tick", 48);
+        for (Screen s : screens.values()) {
+            s.queue.release(budget);
         }
     }
 

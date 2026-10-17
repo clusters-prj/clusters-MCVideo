@@ -1,7 +1,6 @@
 package com.clustersprj.videomap;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -23,9 +22,8 @@ final class Screen {
     /** 再生要求の世代。非同期の音源作成中に stop / 再 play されたら古い要求を捨てるために使う。 */
     final AtomicInteger seq = new AtomicInteger();
 
-    /** 最新フレーム。tiles[row * w + col] が 128x128 のマップカラー配列。 */
-    volatile byte[][] frame;
-    volatile int version;
+    /** フレームの差分管理。tile[row * w + col] が 128x128 のマップカラー。 */
+    final TileUpdateQueue queue;
 
     private FramePlayer player;
 
@@ -34,17 +32,12 @@ final class Screen {
         this.worldName = worldName;
         this.w = w;
         this.h = h;
+        this.queue = new TileUpdateQueue(w * h, ColorLut.BLACK);
     }
 
-    void publish(byte[][] tiles) {
-        this.frame = tiles;
-        this.version++;
-    }
-
+    /** 画面を黒にする(1tickの更新上限に沿って順次反映される)。 */
     void fillBlack() {
-        byte[][] tiles = new byte[w * h][128 * 128];
-        for (byte[] t : tiles) Arrays.fill(t, ColorLut.BLACK);
-        publish(tiles);
+        queue.offerFill(ColorLut.BLACK);
     }
 
     synchronized void startPlayer(FramePlayer p) {
